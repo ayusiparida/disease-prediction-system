@@ -1,140 +1,85 @@
 from flask import Flask, request, jsonify
-from flask_cors import CORS
 import pickle
 import numpy as np
+from flask_cors import CORS
 
 app = Flask(__name__)
-CORS(app)
+CORS(app)  # ✅ allow frontend access
 
-# -----------------------------
-# LOAD MODEL & SYMPTOMS
-# -----------------------------
+# Load model and symptoms
 model = pickle.load(open("model.pkl", "rb"))
 symptoms_list = pickle.load(open("symptoms.pkl", "rb"))
 
-# -----------------------------
-# DEFAULT INFO (for all diseases)
-# -----------------------------
-default_info = {
-    "description": "This condition requires medical attention. Please consult a healthcare professional.",
-    "precautions": [
-        "Maintain proper hygiene",
-        "Drink plenty of water",
-        "Take adequate rest",
-        "Consult a doctor if symptoms persist"
-    ]
+# -------------------------------
+# Dummy Disease Info (You can improve later)
+# -------------------------------
+disease_description = {
+    "Fungal infection": "A fungal infection affects skin, hair or nails.",
+    "Allergy": "An allergic reaction by the immune system.",
+    "GERD": "Gastroesophageal reflux disease causing acid reflux.",
 }
 
-# -----------------------------
-# CUSTOM DISEASE INFO
-# -----------------------------
-disease_info = {
-    "Fungal infection": {
-        "description": "A fungal infection affects skin, hair or nails.",
-        "precautions": [
-            "Keep skin clean and dry",
-            "Avoid sharing clothes",
-            "Use antifungal creams",
-            "Maintain hygiene"
-        ]
-    },
-    "Allergy": {
-        "description": "Reaction of immune system to allergens.",
-        "precautions": [
-            "Avoid allergens",
-            "Take antihistamines",
-            "Keep surroundings clean",
-            "Wear mask outdoors"
-        ]
-    },
-    "GERD": {
-        "description": "Acid reflux causing heartburn.",
-        "precautions": [
-            "Avoid spicy food",
-            "Eat smaller meals",
-            "Do not lie down after eating",
-            "Maintain healthy weight"
-        ]
-    },
-    "Diabetes": {
-        "description": "A chronic condition affecting blood sugar levels.",
-        "precautions": [
-            "Monitor blood sugar regularly",
-            "Exercise regularly",
-            "Follow a healthy diet",
-            "Avoid sugary foods"
-        ]
-    },
-    "Hypertension": {
-        "description": "High blood pressure condition.",
-        "precautions": [
-            "Reduce salt intake",
-            "Exercise regularly",
-            "Avoid stress",
-            "Monitor BP levels"
-        ]
-    }
+disease_precaution = {
+    "Fungal infection": ["Keep area clean", "Use antifungal cream", "Avoid moisture"],
+    "Allergy": ["Avoid allergens", "Take antihistamines", "Consult doctor"],
+    "GERD": ["Avoid spicy food", "Eat smaller meals", "Do not lie down after eating"],
 }
 
-# -----------------------------
-# HELPER FUNCTION
-# -----------------------------
-def create_input_vector(user_symptoms):
-    input_vector = [0] * len(symptoms_list)
-
-    for symptom in user_symptoms:
-        if symptom in symptoms_list:
-            index = symptoms_list.index(symptom)
-            input_vector[index] = 1
-
-    return input_vector
-
-# -----------------------------
-# ROUTES
-# -----------------------------
-
+# -------------------------------
+# HOME ROUTE
+# -------------------------------
 @app.route("/")
 def home():
     return "API is running"
 
-# 👉 Get all symptoms
+# -------------------------------
+# GET SYMPTOMS
+# -------------------------------
 @app.route("/symptoms", methods=["GET"])
 def get_symptoms():
     return jsonify(symptoms_list)
 
-# 👉 Prediction API
+# -------------------------------
+# PREDICT DISEASE
+# -------------------------------
 @app.route("/predict", methods=["POST"])
 def predict():
+    data = request.get_json()
+    selected_symptoms = data.get("symptoms", [])
+
+    # Create input vector
+    input_vector = [0] * len(symptoms_list)
+
+    for symptom in selected_symptoms:
+        if symptom in symptoms_list:
+            index = symptoms_list.index(symptom)
+            input_vector[index] = 1
+
+    input_vector = np.array(input_vector).reshape(1, -1)
+
+    # Prediction
+    prediction = model.predict(input_vector)[0]
+
+    # Confidence
     try:
-        data = request.json
-        user_symptoms = data.get("symptoms", [])
+        confidence = float(np.max(model.predict_proba(input_vector)))
+    except:
+        confidence = 0.0
 
-        # Convert symptoms to input vector
-        input_vector = create_input_vector(user_symptoms)
+    # Get info
+    description = disease_description.get(prediction, "No description available")
+    precautions = disease_precaution.get(prediction, ["No precautions available"])
 
-        # Prediction
-        prediction = model.predict([input_vector])[0]
+    # ✅ FINAL RESPONSE (IMPORTANT FIX)
+    return jsonify({
+        "disease": str(prediction),
+        "confidence": round(confidence, 2),
+        "description": description,
+        "precautions": precautions
+    })
 
-        # Confidence score
-        confidence = max(model.predict_proba([input_vector])[0])
-
-        # Get disease info
-        info = disease_info.get(prediction, default_info)
-
-        return jsonify({
-            "predicted_disease": prediction,
-            "confidence": round(float(confidence), 2),
-            "description": info["description"],
-            "precautions": info["precautions"]
-        })
-
-    except Exception as e:
-        return jsonify({
-            "error": str(e)
-        })
-
-# -----------------------------
-# RUN SERVER
-# -----------------------------
+# -------------------------------
+# RUN APP
+# -------------------------------
 if __name__ == "__main__":
     app.run(debug=True)
